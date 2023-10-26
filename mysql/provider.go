@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"cloud.google.com/go/cloudsqlconn"
 	"github.com/go-sql-driver/mysql"
 	"github.com/hashicorp/go-version"
 	"google.golang.org/api/googleapi"
@@ -95,7 +96,8 @@ func Provider() *schema.Provider {
 					"ALL_PROXY",
 					"all_proxy",
 				}, nil),
-				ValidateFunc: validation.StringMatch(regexp.MustCompile("^socks5h?://.*:\\d+$"), "The proxy URL is not a valid socks url."),
+				ValidateFunc: validation.StringMatch(regexp.MustCompile("^socks5h?://.*:\\d+$"),
+					"The proxy URL is not a valid socks url."),
 			},
 
 			"tls": {
@@ -137,6 +139,12 @@ func Provider() *schema.Provider {
 				Optional: true,
 				Default:  300,
 			},
+
+			"use_iam_db_auth": {
+				Type:     schema.TypeBool,
+				Optional: true,
+				Default:  false,
+			},
 		},
 
 		DataSourcesMap: map[string]*schema.Resource{
@@ -166,6 +174,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 	var allowClearTextPasswords = authPlugin == cleartextPasswords
 	var allowNativePasswords = authPlugin == nativePasswords
 	var password = d.Get("password").(string)
+	var useIamDbAuth = d.Get("use_iam_db_auth").(bool)
 
 	proto := "tcp"
 	if len(endpoint) > 0 && endpoint[0] == '/' {
@@ -173,7 +182,13 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 	} else if strings.HasPrefix(endpoint, "cloudsql://") {
 		proto = "cloudsql"
 		endpoint = strings.ReplaceAll(endpoint, "cloudsql://", "")
-		_, err := cloudsql.RegisterDriver("cloudsql")
+
+		var cloudsqlOption []cloudsqlconn.Option
+		if useIamDbAuth {
+			cloudsqlOption = append(cloudsqlOption, cloudsqlconn.WithIAMAuthN())
+		}
+
+		_, err := cloudsql.RegisterDriver("cloudsql", cloudsqlOption...)
 		if err != nil {
 			return nil, diag.Errorf("failed to register driver %v", err)
 		}
