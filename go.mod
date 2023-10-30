@@ -2,7 +2,6 @@ module github.com/terraform-providers/terraform-provider-mysql
 
 require (
 	cloud.google.com/go/cloudsqlconn v1.1.1
-	cloud.google.com/go/compute/metadata v0.2.3
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.4.0
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.2.2
 	github.com/creasty/defaults v1.6.0
@@ -17,6 +16,7 @@ require (
 
 require (
 	cloud.google.com/go/compute v1.19.1 // indirect
+	cloud.google.com/go/compute/metadata v0.2.3 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.3.0 // indirect
 	github.com/AzureAD/microsoft-authentication-library-for-go v0.9.0 // indirect
 	github.com/agext/levenshtein v1.2.3 // indirect

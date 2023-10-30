@@ -14,21 +14,18 @@ import (
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn"
-	"cloud.google.com/go/compute/metadata"
+	cloudsql "cloud.google.com/go/cloudsqlconn/mysql/mysql"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
+	azidentity "github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/go-sql-driver/mysql"
 	"github.com/hashicorp/go-version"
-	"google.golang.org/api/googleapi"
-
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
-
 	"golang.org/x/net/proxy"
-
-	cloudsql "cloud.google.com/go/cloudsqlconn/mysql/mysql"
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
-	azidentity "github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"google.golang.org/api/googleapi"
+	"google.golang.org/api/oauth2/v2"
 )
 
 const (
@@ -189,11 +186,18 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		if useIamDbAuth {
 			// Auth cloudsql database using IAM
 			cloudsqlOption = append(cloudsqlOption, cloudsqlconn.WithIAMAuthN())
-			// Get username from service account
-			serviceAccountEmail, err := metadata.Email("")
-			if err == nil {
-				username = strings.Split(serviceAccountEmail, "@")[0]
+			userInfoSvc, err := oauth2.NewService(ctx)
+			if err != nil {
+				return nil, diag.Errorf("failed to create oauth2 service %v", err)
 			}
+			info, err := userInfoSvc.Tokeninfo().Do()
+			if err != nil {
+				return nil, diag.Errorf("failed to get IAM user info %v", err)
+			}
+
+			username = strings.Split(info.Email, "@")[0]
+			allowClearTextPasswords = true
+			allowNativePasswords = true
 		}
 
 		_, err := cloudsql.RegisterDriver("cloudsql", cloudsqlOption...)

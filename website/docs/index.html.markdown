@@ -81,6 +81,25 @@ provider "mysql" {
 
 See also: [Authentication at Google](https://cloud.google.com/docs/authentication#service-accounts).
 
+### GCP CloudSQL Connection using Automatic IAM database authentication
+
+For connections to GCP hosted instances, the provider can connect through the Cloud SQL MySQL library.
+
+To enable Cloud SQL MySQL library, add `cloudsql://` to the endpoint `Network type` DSN string and connection name of the instance in following format: `project/region/instance` (or `project:region:instance`).
+
+To Use [Automatic IAM database authentication](https://cloud.google.com/sql/docs/mysql/authentication#automatic) feature, set `use_iam_db_auth = true`. The provider will automatically get the username of current IAM account and use it as username.
+
+```hcl
+# Configure the MySQL provider for CloudSQL Mysql
+provider "mysql" {
+  endpoint        = "cloudsql://project:region:instance"
+  username        = "-"
+  use_iam_db_auth = true
+}
+```
+
+See also: [Authentication at Google](https://cloud.google.com/docs/authentication#service-accounts).
+
 ### Azure MySQL server with AzureAD auth enabled connection
 
 For connections to Azure MySQL server with AzureAD auth enabled, the provider connects using DefaultAzureCredential from the Azure SDK for Go.
@@ -120,4 +139,4 @@ The following arguments are supported:
 * `max_open_conns` - (Optional) Sets the maximum number of open connections to the database. If n <= 0, then there is no limit on the number of open connections.
 * `conn_params` - (Optional) Sets extra mysql connection parameters (ODBC parameters). Most useful for session variables such as `default_storage_engine`, `foreign_key_checks` or `sql_log_bin`.
 * `authentication_plugin` - (Optional) Sets the authentication plugin, it can be one of the following: `native` or `cleartext`. Defaults to `native`.
-* `use_iam_db_auth` - (Optional, cloudsql only) Use [Cloud SQL’s automatic IAM DB AuthN](https://cloud.google.com/sql/docs/mysql/authentication#automatic) feature.
+* `use_iam_db_auth` - (Optional, cloudsql only) Use [Automatic IAM database authentication](https://cloud.google.com/sql/docs/mysql/authentication#automatic) feature.
