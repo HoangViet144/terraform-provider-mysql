@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn"
+	"cloud.google.com/go/compute/metadata"
 	"github.com/go-sql-driver/mysql"
 	"github.com/hashicorp/go-version"
 	"google.golang.org/api/googleapi"
@@ -175,6 +176,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 	var allowNativePasswords = authPlugin == nativePasswords
 	var password = d.Get("password").(string)
 	var useIamDbAuth = d.Get("use_iam_db_auth").(bool)
+	var username = d.Get("username").(string)
 
 	proto := "tcp"
 	if len(endpoint) > 0 && endpoint[0] == '/' {
@@ -185,7 +187,13 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 
 		var cloudsqlOption []cloudsqlconn.Option
 		if useIamDbAuth {
+			// Auth cloudsql database using IAM
 			cloudsqlOption = append(cloudsqlOption, cloudsqlconn.WithIAMAuthN())
+			// Get username from service account
+			serviceAccountEmail, err := metadata.Email("")
+			if err == nil {
+				username = strings.Split(serviceAccountEmail, "@")[0]
+			}
 		}
 
 		_, err := cloudsql.RegisterDriver("cloudsql", cloudsqlOption...)
@@ -224,7 +232,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 	}
 
 	conf := mysql.Config{
-		User:                    d.Get("username").(string),
+		User:                    username,
 		Passwd:                  password,
 		Net:                     proto,
 		Addr:                    endpoint,
