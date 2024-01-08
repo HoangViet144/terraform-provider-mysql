@@ -4,13 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/hashicorp/go-version"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"log"
 	"regexp"
 	"sort"
 	"strings"
 	"unicode"
+
+	"github.com/hashicorp/go-version"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
@@ -25,7 +27,9 @@ type MySQLGrant struct {
 }
 
 func (m MySQLGrant) String() string {
-	return fmt.Sprintf("{Database=%v,Table=%v,Privileges=%v,Roles=%v,Grant=%v}", m.Database, m.Table, m.Privileges, m.Roles, m.Grant)
+	return fmt.Sprintf(
+		"{Database=%v,Table=%v,Privileges=%v,Roles=%v,Grant=%v}", m.Database, m.Table, m.Privileges, m.Roles, m.Grant,
+	)
 }
 
 func resourceGrant() *schema.Resource {
@@ -37,6 +41,7 @@ func resourceGrant() *schema.Resource {
 		Importer: &schema.ResourceImporter{
 			StateContext: ImportGrant,
 		},
+		CustomizeDiff: CustomizeDiffGrant,
 
 		Schema: map[string]*schema.Schema{
 			"user": {
@@ -103,6 +108,12 @@ func resourceGrant() *schema.Resource {
 				ForceNew:   true,
 				Deprecated: "Please use tls_option in mysql_user.",
 				Default:    "NONE",
+			},
+
+			"show_current_grant": {
+				Type:     schema.TypeBool,
+				Optional: true,
+				Default:  false,
 			},
 		},
 	}
@@ -213,14 +224,17 @@ func CreateGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 	if hasPrivs {
 		if len(grant.Privileges) >= 1 {
 			if grant.Database == database && grant.Table == table && grant.Grant == grantOption {
-				return diag.Errorf("user/role %s already has unmanaged grant to %s.%s - import it first", userOrRole, grant.Database, grant.Table)
+				return diag.Errorf("user/role %s already has unmanaged grant to %s.%s - import it first", userOrRole,
+					grant.Database, grant.Table)
 			}
 		}
 	} else {
 		if len(grant.Roles) >= 1 {
 			// Granting role is just role without DB & table.
 			if grant.Database == "" && grant.Table == "" && grant.Grant == grantOption {
-				return diag.Errorf("user/role %s already has unmanaged grant for roles %v - import it first", userOrRole, grant.Roles)
+				return diag.Errorf(
+					"user/role %s already has unmanaged grant for roles %v - import it first", userOrRole, grant.Roles,
+				)
 			}
 		}
 	}
@@ -365,7 +379,9 @@ func UpdateGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 	return nil
 }
 
-func updatePrivileges(ctx context.Context, d *schema.ResourceData, db *sql.DB, user string, database string, table string) error {
+func updatePrivileges(
+	ctx context.Context, d *schema.ResourceData, db *sql.DB, user string, database string, table string,
+) error {
 	oldPrivsIf, newPrivsIf := d.GetChange("privileges")
 	oldPrivs := oldPrivsIf.(*schema.Set)
 	newPrivs := newPrivsIf.(*schema.Set)
@@ -379,7 +395,8 @@ func updatePrivileges(ctx context.Context, d *schema.ResourceData, db *sql.DB, u
 			revokes[i] = v.(string)
 		}
 
-		sqlCommand := fmt.Sprintf("REVOKE %s ON %s.%s FROM %s", strings.Join(revokes, ","), formatDatabaseName(database), formatTableName(table), user)
+		sqlCommand := fmt.Sprintf("REVOKE %s ON %s.%s FROM %s", strings.Join(revokes, ","),
+			formatDatabaseName(database), formatTableName(table), user)
 
 		log.Printf("[DEBUG] SQL: %s", sqlCommand)
 
@@ -395,7 +412,8 @@ func updatePrivileges(ctx context.Context, d *schema.ResourceData, db *sql.DB, u
 			grants[i] = v.(string)
 		}
 
-		sqlCommand := fmt.Sprintf("GRANT %s ON %s.%s TO %s", strings.Join(grants, ","), formatDatabaseName(database), formatTableName(table), user)
+		sqlCommand := fmt.Sprintf("GRANT %s ON %s.%s TO %s", strings.Join(grants, ","), formatDatabaseName(database),
+			formatTableName(table), user)
 
 		log.Printf("[DEBUG] SQL: %s", sqlCommand)
 
@@ -476,7 +494,10 @@ func ImportGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 	userHostDatabaseTable := strings.Split(d.Id(), "@")
 
 	if len(userHostDatabaseTable) != 4 && len(userHostDatabaseTable) != 5 {
-		return nil, fmt.Errorf("wrong ID format %s - expected user@host@database@table (and optionally ending @ to signify grant option) where some parts can be empty)", d.Id())
+		return nil, fmt.Errorf(
+			"wrong ID format %s - expected user@host@database@table (and optionally ending @ to signify grant option) where some parts can be empty)",
+			d.Id(),
+		)
 	}
 
 	user := userHostDatabaseTable[0]
@@ -574,7 +595,10 @@ func showUserGrants(ctx context.Context, db *sql.DB, user string) ([]*MySQLGrant
 		}
 
 		if strings.HasPrefix(rawGrant, "REVOKE") {
-			log.Printf("[WARN] Partial revokes are not fully supported and lead to unexpected behavior. Consult documentation https://dev.mysql.com/doc/refman/8.0/en/partial-revokes.html on how to disable them for safe and reliable terraform. Relevant partial revoke: %s\n", rawGrant)
+			log.Printf(
+				"[WARN] Partial revokes are not fully supported and lead to unexpected behavior. Consult documentation https://dev.mysql.com/doc/refman/8.0/en/partial-revokes.html on how to disable them for safe and reliable terraform. Relevant partial revoke: %s\n",
+				rawGrant,
+			)
 			continue
 		}
 
@@ -779,4 +803,57 @@ func setToArray(s interface{}) []string {
 		ret = append(ret, elem.(string))
 	}
 	return ret
+}
+
+func CustomizeDiffGrant(ctx context.Context, d *schema.ResourceDiff, meta interface{}) error {
+	showCurrentGrant := d.Get("show_current_grant").(bool)
+	if !showCurrentGrant {
+		return nil
+	}
+
+	db, err := getDatabaseFromMeta(ctx, meta)
+	if err != nil {
+		return err
+	}
+
+	hasRoles, err := supportsRoles(ctx, meta)
+	if err != nil {
+		return fmt.Errorf("failed getting role support: %v", err)
+	}
+
+	userOrRole, _, err := userOrRole(
+		d.Get("user").(string), d.Get("host").(string), d.Get("role").(string), hasRoles,
+	)
+	if err != nil {
+		return fmt.Errorf("failed getting user or role: %v", err)
+	}
+
+	database := d.Get("database").(string)
+	grantOption := d.Get("grant").(bool)
+	rolesSet := d.Get("roles").(*schema.Set)
+	rolesCount := len(rolesSet.List())
+
+	if rolesCount != 0 {
+		// For some reason, role can have still database / table, that
+		// makes no sense. Remove them when reading.
+		database = ""
+	}
+
+	allGrants, err := showUserGrants(ctx, db, userOrRole)
+	if err != nil {
+		return fmt.Errorf("showGrant - getting all grants failed: %w", err)
+	}
+
+	grantStatus := fmt.Sprintf("\n-----\nCurrent grant of user/role %s:\n", userOrRole)
+	for _, grant := range allGrants {
+		if grant.Grant == grantOption && normalizeDatabase(grant.Database) == normalizeDatabase(database) {
+			grantStatus += fmt.Sprintf(
+				"- Table: %s, privilege: %v, role: %v\n", grant.Table, grant.Privileges, grant.Roles,
+			)
+		}
+	}
+	grantStatus += "-----\n"
+	tflog.Warn(ctx, grantStatus)
+
+	return nil
 }
