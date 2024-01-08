@@ -844,7 +844,7 @@ func CustomizeDiffGrant(ctx context.Context, d *schema.ResourceDiff, meta interf
 		return fmt.Errorf("showGrant - getting all grants failed: %w", err)
 	}
 
-	grantStatus := fmt.Sprintf("\n-----\nCurrent grant of user/role %s:\n", userOrRole)
+	grantStatus := fmt.Sprintf("\n-----\nCurrent grant of user/role %s for database %s:\n", userOrRole, database)
 	for _, grant := range allGrants {
 		if grant.Grant == grantOption && normalizeDatabase(grant.Database) == normalizeDatabase(database) {
 			grantStatus += fmt.Sprintf(
