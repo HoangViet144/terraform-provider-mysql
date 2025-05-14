@@ -185,7 +185,11 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		var cloudsqlOption []cloudsqlconn.Option
 		if useIamDbAuth {
 			// Auth cloudsql database using IAM
-			cloudsqlOption = append(cloudsqlOption, cloudsqlconn.WithIAMAuthN())
+			cloudsqlOption = append(
+				cloudsqlOption,
+				cloudsqlconn.WithIAMAuthN(),
+				cloudsqlconn.WithDefaultDialOptions(cloudsqlconn.WithAutoIP()),
+			)
 			userInfoSvc, err := oauth2.NewService(ctx)
 			if err != nil {
 				return nil, diag.Errorf("failed to create oauth2 service %v", err)
