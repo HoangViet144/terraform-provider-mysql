@@ -16,7 +16,7 @@ import (
 	"cloud.google.com/go/cloudsqlconn"
 	cloudsql "cloud.google.com/go/cloudsqlconn/mysql/mysql"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
-	azidentity "github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/go-sql-driver/mysql"
 	"github.com/hashicorp/go-version"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
@@ -90,23 +90,29 @@ func Provider() *schema.Provider {
 			"proxy": {
 				Type:     schema.TypeString,
 				Optional: true,
-				DefaultFunc: schema.MultiEnvDefaultFunc([]string{
-					"ALL_PROXY",
-					"all_proxy",
-				}, nil),
-				ValidateFunc: validation.StringMatch(regexp.MustCompile("^socks5h?://.*:\\d+$"),
-					"The proxy URL is not a valid socks url."),
+				DefaultFunc: schema.MultiEnvDefaultFunc(
+					[]string{
+						"ALL_PROXY",
+						"all_proxy",
+					}, nil,
+				),
+				ValidateFunc: validation.StringMatch(
+					regexp.MustCompile("^socks5h?://.*:\\d+$"),
+					"The proxy URL is not a valid socks url.",
+				),
 			},
 
 			"tls": {
 				Type:        schema.TypeString,
 				Optional:    true,
 				DefaultFunc: schema.EnvDefaultFunc("MYSQL_TLS_CONFIG", "false"),
-				ValidateFunc: validation.StringInSlice([]string{
-					"true",
-					"false",
-					"skip-verify",
-				}, false),
+				ValidateFunc: validation.StringInSlice(
+					[]string{
+						"true",
+						"false",
+						"skip-verify",
+					}, false,
+				),
 			},
 
 			"max_conn_lifetime_sec": {
@@ -143,6 +149,12 @@ func Provider() *schema.Provider {
 				Optional: true,
 				Default:  false,
 			},
+
+			"use_psc": {
+				Type:     schema.TypeBool,
+				Optional: true,
+				Default:  false,
+			},
 		},
 
 		DataSourcesMap: map[string]*schema.Resource{
@@ -174,6 +186,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 	var password = d.Get("password").(string)
 	var useIamDbAuth = d.Get("use_iam_db_auth").(bool)
 	var username = d.Get("username").(string)
+	var usePsc = d.Get("use_psc").(bool)
 
 	proto := "tcp"
 	if len(endpoint) > 0 && endpoint[0] == '/' {
@@ -202,6 +215,12 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 			username = strings.Split(info.Email, "@")[0]
 			allowClearTextPasswords = true
 			allowNativePasswords = true
+		}
+
+		if usePsc {
+			cloudsqlOption = append(cloudsqlOption, cloudsqlconn.WithDefaultDialOptions(cloudsqlconn.WithPSC()))
+		} else {
+			cloudsqlOption = append(cloudsqlOption, cloudsqlconn.WithDefaultDialOptions(cloudsqlconn.WithAutoIP()))
 		}
 
 		_, err := cloudsql.RegisterDriver("cloudsql", cloudsqlOption...)
@@ -256,9 +275,11 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		return nil, diag.Errorf("failed making dialer: %v", err)
 	}
 
-	mysql.RegisterDialContext("tcp", func(ctx context.Context, network string) (net.Conn, error) {
-		return dialer.Dial("tcp", network)
-	})
+	mysql.RegisterDialContext(
+		"tcp", func(ctx context.Context, network string) (net.Conn, error) {
+			return dialer.Dial("tcp", network)
+		},
+	)
 
 	mysqlConf := &MySQLConfiguration{
 		Config:                 &conf,
@@ -394,26 +415,28 @@ func createNewConnection(ctx context.Context, conf *MySQLConfiguration) (*OneCon
 	// when Terraform thinks it's available and when it is actually available.
 	// This is particularly acute when provisioning a server and then immediately
 	// trying to provision a database on it.
-	retryError := resource.RetryContext(ctx, conf.ConnectRetryTimeoutSec, func() *resource.RetryError {
-		db, err = sql.Open(driverName, conf.Config.FormatDSN())
-		if err != nil {
-			if mysqlErrorNumber(err) != 0 || cloudsqlErrorNumber(err) != 0 || ctx.Err() != nil {
-				return resource.NonRetryableError(err)
-			}
-			return resource.RetryableError(err)
-		}
-
-		err = db.PingContext(ctx)
-		if err != nil {
-			if mysqlErrorNumber(err) != 0 || cloudsqlErrorNumber(err) != 0 || ctx.Err() != nil {
-				return resource.NonRetryableError(err)
+	retryError := resource.RetryContext(
+		ctx, conf.ConnectRetryTimeoutSec, func() *resource.RetryError {
+			db, err = sql.Open(driverName, conf.Config.FormatDSN())
+			if err != nil {
+				if mysqlErrorNumber(err) != 0 || cloudsqlErrorNumber(err) != 0 || ctx.Err() != nil {
+					return resource.NonRetryableError(err)
+				}
+				return resource.RetryableError(err)
 			}
 
-			return resource.RetryableError(err)
-		}
+			err = db.PingContext(ctx)
+			if err != nil {
+				if mysqlErrorNumber(err) != 0 || cloudsqlErrorNumber(err) != 0 || ctx.Err() != nil {
+					return resource.NonRetryableError(err)
+				}
 
-		return nil
-	})
+				return resource.RetryableError(err)
+			}
+
+			return nil
+		},
+	)
 
 	if retryError != nil {
 		return nil, fmt.Errorf("could not connect to server: %s", retryError)
